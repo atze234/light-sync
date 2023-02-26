@@ -118,7 +118,7 @@ NUMBER_OF_K_MEANS_CLUSTERS = 6
 # Captured screen can have a very large amount of data which takes longer time to process
 # by the K Means algorithm.
 # Image will be scaled to a much smaller size resulting in real time updating of the lights
-INPUT_IMAGE_REDUCED_SIZE = 50
+INPUT_IMAGE_REDUCED_SIZE = 100
 
 # PHUE config file name
 PHUE_CONFIG_FILE = "phue_config"
@@ -908,9 +908,9 @@ def main(argv):
                     request_timeout, clear_update_flag)
                 update_timer.start()
 
-                print ('Updating with RGB: [{0}, {1}, {2}]'.format(
-                    result_color.color[0], result_color.color[1], result_color.color[2]))
-                print ('brightness: {0}'.format(current_brightness))
+                # print ('Updating with RGB: [{0}, {1}, {2}]'.format(
+                #     result_color.color[0], result_color.color[1], result_color.color[2]))
+                # print ('brightness: {0}'.format(current_brightness))
 
                 if dim_lights_instead_of_turn_off:
                     command = {'xy': result_color.get_hue_color(),
@@ -933,7 +933,7 @@ def main(argv):
                     #print(r.text)
 
                 prev_fps = 1 / (time.time()-last_time)
-                print ('fps: {0}'.format(prev_fps))
+                #print ('fps: {0}'.format(prev_fps))
 
                 # BETA VERSION !!!
                 # If bad FPS
