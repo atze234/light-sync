@@ -37,6 +37,7 @@ import cv2
 import mss
 import requests
 import json
+import signal
 
 from phue_lib import Bridge, PhueRegistrationException
 from discovery_lib import DiscoveryLib
@@ -45,7 +46,7 @@ from frame_color_lib import FrameColorLib
 # SETUP VARIABLES (tweak them for preffered effect)
 
 # Your Philips Hue Bridge IP
-BRIDGE_IP = '192.168.1.22'
+BRIDGE_IP = '192.168.178.28'
 
 # Part of screen to capture (useful if run in multiple instance for custom effects like stereo)
 # full, left, right, side-left side-right
@@ -58,13 +59,13 @@ MY_LIGHT_NAMES = ['Light1','Light2']
 MY_LIGHT_IDS = []
 
 # Dim lights instead of turn off
-DIM_LIGHTS_INSTEAD_OF_TURN_OFF = False
+DIM_LIGHTS_INSTEAD_OF_TURN_OFF = True
 
 # MAX brightness
-STARTING_BRIGHTNESS = 110
+STARTING_BRIGHTNESS = 255
 
-# Dim brightness
-DIM_BRIGHTNESS = 3
+# Dim/MIN brightness - active with DIM_LIGHTS_INSTEAD_OF_TURN_OFF
+DIM_BRIGHTNESS = 110
 
 # Default color to be used when RGB are all 0
 DEFAULT_DARK_COLOR = [64, 75, 78]
@@ -76,10 +77,10 @@ BRIGHTNESS_SKIP_SENSITIVITY = 10
 # 0 = instant
 # 1 = instant if frame diff is over threshold and smooth if frames are similar
 # 2 = smooth
-TRANSITION_TYPE = 0
+TRANSITION_TYPE = 2
 
 # Transition time for smooth transitions
-TRANSITION_TIME = 1
+TRANSITION_TIME = 2
 
 # Max number of Hue update requests per second. Used to prevent Hue Bridge bottleneck
 HUE_MAX_REQUESTS_PER_SECOND = 10
@@ -117,21 +118,24 @@ NUMBER_OF_K_MEANS_CLUSTERS = 6
 # Captured screen can have a very large amount of data which takes longer time to process
 # by the K Means algorithm.
 # Image will be scaled to a much smaller size resulting in real time updating of the lights
-INPUT_IMAGE_REDUCED_SIZE = 100
+INPUT_IMAGE_REDUCED_SIZE = 50
 
 # PHUE config file name
 PHUE_CONFIG_FILE = "phue_config"
 
+# Throttle scan Cycles for CPU Usage
+LOOP_SLEEP = False
+
 # BETA version!!!
 # Auto adjust performance
-AUTO_ADJUST_PERFORMANCE = True
+AUTO_ADJUST_PERFORMANCE = False
 
 # Auto adjust performance after number of low fps in a row
 AUTO_ADJUST_PERFORMANCE_NUMBER_OF_LOW_FPS_IN_A_ROW = 2
 
 # BETA version!!!
 # Flicker prevent
-FLICKER_PREVENT = True
+FLICKER_PREVENT = False
 
 # Number of frames in buffer
 FLICKER_PREVENT_BUFFER_SIZE = 20
@@ -182,6 +186,8 @@ def clear_update_flag():
     global CAN_UPDATE_HUE
     CAN_UPDATE_HUE = True
 
+
+
 def usage(parser):
     """Help"""
     parser.print_help()
@@ -192,6 +198,10 @@ def usage(parser):
     sys.exit()
 
 def main(argv):
+    def signal_handler(sig, frame):
+        for hue_light_id in my_light_ids:
+            bridge.set_light(int(hue_light_id), 'on', False)
+        sys.exit(0)
     "main routine"
 
     # Variable Defaults
@@ -218,6 +228,8 @@ def main(argv):
     input_image_reduced_size = INPUT_IMAGE_REDUCED_SIZE
     hue_max_requests_per_second = HUE_MAX_REQUESTS_PER_SECOND
 
+    loop_sleep = LOOP_SLEEP
+
     # Auto adjust performance
     auto_adjust_performance = AUTO_ADJUST_PERFORMANCE
     adjust_counter_limit = AUTO_ADJUST_PERFORMANCE_NUMBER_OF_LOW_FPS_IN_A_ROW
@@ -240,7 +252,7 @@ def main(argv):
     parser.add_argument("-i", "--bridgeip", help="Your Philips Hue Bridge IP")
     parser.add_argument("-u", "--user", help="Your Philips Hue Bridge User")
     parser.add_argument("-p", "--screenpart", help="Part of the screen to capture: full, left, right, \
-                                                side-left, side-right (default full)")
+                                                side-left, side-right, side-left-half, side-right-half (default full)")
     parser.add_argument("-l", "--lightids", help="Your Philips HUE light Ids that will be updated, comma separated")
     parser.add_argument("-L", "--lights", help="Your Philips HUE light Names that will be updated, comma separated")
     parser.add_argument("-b", "--dimbrightness", help="Dim/MIN brightness [0-256] must be less than maxbrightness")
@@ -264,6 +276,9 @@ def main(argv):
     parser.add_argument("-T", "--maxrequestspersecond", help="Max requests per second sent to bridge api (default 10)")
     parser.add_argument("-a", "--autodiscovery", help="Bridge auto discovery on LAN")
     
+    # Adjust Screencapture Timing
+    parser.add_argument("-Ls", "--loopsleep", help="wait between screencapture cycles reducing cpu load in seconds (float allowed) (default False)")
+
     # Auto adjust performance
     parser.add_argument("-A", "--autoadjustperformance", help="Auto adjust script performance (default True)")
     parser.add_argument("-Af", "--autoadjustperformancelowfpscount", help="Number of low fps in a row to trigger performance adjust (default 2)")
@@ -437,7 +452,16 @@ def main(argv):
         except ValueError:
             print ("maxrequestspersecond must be a number\n")
             usage(parser)
-    
+    #sleep
+    if args.loopsleep:
+        try:
+            loop_sleep = float(args.loopsleep)
+            print ("Set loop Sleep: " +
+                    str(loop_sleep))
+        except ValueError:
+            print ("loop_sleep must be a float\n")
+            usage(parser)
+
     # Auto adjust performance args
     if args.autoadjustperformance:
         try:
@@ -641,8 +665,11 @@ def main(argv):
     shown_instructions = False
     current_dir = os.path.dirname(__file__)
     phue_config_file = os.path.join(current_dir, PHUE_CONFIG_FILE)
-    bridge_ip = DISCOVERY_LIB.getBridgeIP()
-    print ("Discovered bridge ip: " + bridge_ip)
+    if bridge_ip:
+        pass
+    else:
+        bridge_ip = DISCOVERY_LIB.getBridgeIP()
+    print ("Using bridge ip: " + bridge_ip)
     print('Connecting to bridge')
     i = 0
     while i < 30:
@@ -679,8 +706,8 @@ def main(argv):
             my_light_ids.append(light_names[hue_light].light_id)
     else:
         for hue_light_id in my_light_ids:
-            bridge.set_light(hue_light_id, 'on', True)
-            bridge.set_light(hue_light_id, 'bri', starting_brightness)
+            bridge.set_light(int(hue_light_id), 'on', True)
+            bridge.set_light(int(hue_light_id), 'bri', starting_brightness)
            
     with mss.mss() as sct:
         # Part of the screen to capture (use if you want to create a multiple color effect)
@@ -702,19 +729,27 @@ def main(argv):
             side_mon_width = int(full_mon["width"]/4)
             side_mon_right_offset = full_mon["width"] - side_mon_width
             monitor = {'top': 0, 'left': side_mon_right_offset, 'width': side_mon_width, 'height': full_mon["height"]}
-
+        elif screen_part_to_capture == "side-left-half":
+            side_mon_width = int(full_mon["width"]/4)
+            monitor = {'top': int(full_mon["height"]/4), 'left': 0, 'width': side_mon_width, 'height': int(full_mon["height"]/2)}
+        elif screen_part_to_capture == "side-right-half":
+            side_mon_width = int(full_mon["width"]/4)
+            side_mon_right_offset = full_mon["width"] - side_mon_width
+            monitor = {'top': int(full_mon["height"]/4), 'left': side_mon_right_offset, 'width': side_mon_width, 'height': int(full_mon["height"]/2)}
 
 
         while 'Screen capturing':
-                        
+            signal.signal(signal.SIGINT, signal_handler)
             last_time = time.time()
-            
+            if loop_sleep:
+                time.sleep(loop_sleep)
+            #print(monitor)
             # Get raw pixels from the screen, save it to a Numpy array
             img = numpy.array(sct.grab(monitor))
-
+            
             # Shrink image for performance sake
             current_frame = FRAME_COLOR_LIB.shrink_image(img, input_image_reduced_size)
-            
+            #print(len(current_frame))
             # init frame comparrison result
             comparison_result = None
 

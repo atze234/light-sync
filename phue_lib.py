@@ -871,6 +871,7 @@ class Bridge(object):
                          persistent time settings.
 
         """
+
         if isinstance(parameter, dict):
             data = parameter
         else:
@@ -879,7 +880,7 @@ class Bridge(object):
         if transitiontime is not None:
             data['transitiontime'] = int(round(
                 transitiontime))  # must be int for request format
-
+        
         light_id_array = light_id
         if isinstance(light_id, int) or is_string(light_id):
             light_id_array = [light_id]
